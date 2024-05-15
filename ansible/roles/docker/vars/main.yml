@@ -1,0 +1,9 @@
+---
+os_version_codename: OracleLinux
+required_os_version: 9.3
+docker_compose_version: 2.20.3
+project_dir: /opt/logging
+http_proxy: "http://proxy.example.com:3138"
+https_proxy: "http://proxy.example.com:3138"
+no_proxy: "*.example.com,localhost,localnet,127.0.0.0/8,10.0.0.0/8"
+

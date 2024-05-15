@@ -1,0 +1,8 @@
+export TZ="Europe/Moscow"
+#export CONTAINER_SILENT=on  # do not emit startup message
+export ENABLE_STATISTICS=on
+export ENABLE_LOGFILES=on # yes, we do (comment out to disable)
+export LOGFILES_STORE="/logs/hosts/%hostname:::secpath-replace%/messages.log"
+#export LOGFILES_STORE="/logs/hosts/%hostname:::secpath-replace%/%programname:::secpath-replace%.log"
+#export USE_VALGRIND=on
+#export SYSLOG_APPLIANCE_DEBUG=on

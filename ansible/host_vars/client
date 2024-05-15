@@ -1,0 +1,3 @@
+ansible_password: 'pleasechangeme'
+ansible_become_pass: 'pleasechangeme'
+ansible_user: sp

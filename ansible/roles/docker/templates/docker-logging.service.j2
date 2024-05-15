@@ -1,0 +1,28 @@
+[Unit]
+Description=Logging service
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/logging
+Environment="HTTP_PROXY={{ http_proxy }}"
+Environment="HTTPS_PROXY={{ https_proxy }}"
+Environment="NO_PROXY={{ no_proxy }}"
+RemainAfterExit=yes
+KillMode=process
+KillSignal=SIGTERM
+TimeoutStopSec=30
+TimeoutStartSec=300
+Restart=always
+RestartSec=5m
+ExecStart=/bin/bash -c "PATH=/usr/local/bin:/root/.local/bin:/root/bin:/usr/local/sbin:/sbin:/bin:/usr/sbin:/usr/bin exec docker compose --file /opt/logging/docker-compose.yml up -d"
+ExecStartPre=/bin/bash -c "PATH=/usr/local/bin:/root/.local/bin:/root/bin:/usr/local/sbin:/sbin:/bin:/usr/sbin:/usr/bin exec docker compose --file /opt/logging/docker-compose.yml up --force-recreate --no-start postgresql rsyslog loganalyzer"
+ExecReload=/bin/bash -c "PATH=/usr/local/bin:/root/.local/bin:/root/bin:/usr/local/sbin:/sbin:/bin:/usr/sbin:/usr/bin exec docker compose --file /opt/logging/docker-compose.yml restart"
+ExecStop=/bin/bash -c "PATH=/usr/local/bin:/root/.local/bin:/root/bin:/usr/local/sbin:/sbin:/bin:/usr/sbin:/usr/bin exec docker compose --file /opt/logging/docker-compose.yml down"
+ExecStartPre=/bin/sleep 1
+ExecStartPost=/bin/sleep 3
+SyslogIdentifier=docker-logging
+
+[Install]
+WantedBy=multi-user.target
+Alias=logging.service

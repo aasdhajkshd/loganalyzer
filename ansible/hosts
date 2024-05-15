@@ -1,0 +1,11 @@
+all:
+  hosts:
+  children:
+    supported:
+      hosts:
+        logger:
+          ansible_host: 10.10.160.179
+    logging:
+      hosts:
+        client:
+          ansible_host: 10.10.160.180

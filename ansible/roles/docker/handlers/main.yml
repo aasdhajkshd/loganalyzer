@@ -1,0 +1,23 @@
+---
+- name: Docker Compose Standalone version
+  become: false
+  command: /usr/local/bin/docker-compose version
+
+- name: Reload docker
+  service:
+    name: docker
+    state: reloaded
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: true
+
+- name: Check service logging
+  command:
+    argv:
+    - docker
+    - compose
+    - "-f"
+    - "{{ project_dir }}/docker-compose.yml"
+    - "logs"
+  register: logging_output

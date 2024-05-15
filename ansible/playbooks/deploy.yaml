@@ -1,0 +1,53 @@
+---
+- name: Deploy remote logging
+  hosts: logging
+  remote_user: "{{ ssh_user }}"
+  become: true
+  gather_facts: false
+
+  vars:
+    ssh_user: sp
+    rsyslog_config: "/etc/rsyslog.d/10-remotelog.conf" 
+    env: local
+
+  tasks:
+  - name: Wait for system to become reachable
+    wait_for_connection:
+
+  - name: Gather facts for the first time
+    setup:
+
+  - fail:
+      msg: "OS should be OL9 {{ required_os_version }}, not {{ ansible_distribution }} {{ ansible_distribution_version }}"
+    when: ansible_distribution != 'OracleLinux'
+    
+  - name: "Ensure rsyslog installed"
+    stat:
+      path: "{{ rsyslog_config }}"
+    register: stat_rsyslog_result
+
+  - name: Creating a docker daemon with content
+    copy:
+      dest: "{{ rsyslog_config }}"
+      content: |
+        *.error;authpriv.* action(type="omfwd"
+            queue.filename="fwdRule1"
+            queue.maxdiskspace="1g"
+            queue.saveonshutdown="on"
+            queue.type="LinkedList"
+            action.resumeRetryCount="-1"
+            template="RSYSLOG_ForwardFormat"
+            Target="dlc-logger.example.com" Port="514" Protocol="tcp")
+    notify: Restart rsyslog
+    when: not stat_rsyslog_result.stat.exists
+  
+  handlers:
+  - name: Restart rsyslog
+    service:
+      name: rsyslog
+      state: restarted
+    register: rsyslog_service_status
+
+  - name: Display logging service status
+    debug:
+      var: rsyslog_service_status

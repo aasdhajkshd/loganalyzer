@@ -1,0 +1,9 @@
+---
+- name: Install logger
+  hosts: logger,infra
+  remote_user: "{{ ssh_user }}"
+  become: true
+  gather_facts: false
+  roles:
+    - docker
+

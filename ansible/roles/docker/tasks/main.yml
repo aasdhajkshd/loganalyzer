@@ -1,0 +1,307 @@
+---
+- name: Wait for system to become reachable
+  wait_for_connection:
+
+- name: Gather facts for the first time
+  setup:
+
+- fail:
+    msg: "OS should be OL9 {{ required_os_version }}, not {{ ansible_distribution }} {{ ansible_distribution_version }}"
+  when: ansible_distribution != 'OracleLinux' or ansible_distribution_major_version != '9'
+  
+- name: Install dependencies
+  dnf:
+    name: "{{ item }}"
+    state: latest
+    update_cache: true
+  loop:
+    - ca-certificates
+    - curl
+    - wget
+    - gnupg
+    - net-tools
+    - bind-utils
+    - vim-enhanced
+    - bash-completion
+
+- name: Set distribution to CentOS
+  ansible.builtin.set_fact:
+    distr: "{{ 'CentOS' if (ansible_distribution == 'OracleLinux' ) else (ansible_distribution | lower) }}"
+
+- name: "Check if docker-ce file exists"
+  stat:
+    path: /etc/yum.repos.d/docker-ce.repo
+  register: stat_docker_result
+
+- name: Install docker packages
+  block:
+    - name: Add signing key
+      ansible.builtin.rpm_key:
+        key: "https://download.docker.com/linux/{{ distr | lower }}/gpg"
+        state: present
+
+    - name: Add repository into repo.d list
+      ansible.builtin.yum_repository:
+        name: docker
+        description: docker repository
+        baseurl: "https://download.docker.com/linux/{{ distr | lower }}/$releasever/$basearch/stable"
+        enabled: true
+        gpgcheck: true
+        gpgkey: "https://download.docker.com/linux/{{ distr | lower}}/gpg"
+        file: docker-ce
+
+    - name: Install docker
+      dnf:
+        name: "{{ item }}"
+        state: latest
+        update_cache: true
+      loop:
+        - docker-ce
+        - docker-ce-cli
+        - containerd.io
+        - docker-buildx-plugin 
+        - docker-compose-plugin
+
+    - name: Install docker-compose
+      get_url:
+        url: https://github.com/docker/compose/releases/download/v{{ docker_compose_version }}/docker-compose-linux-x86_64
+        dest: /usr/local/bin/docker-compose
+        mode: 'u+rwx,g+rx'
+      notify: Docker Compose Standalone version
+
+    - name: Change file ownership, group and permissions
+      ansible.builtin.file:
+        path: /usr/local/bin/docker-compose
+        owner: "{{ ssh_user }}"
+        group: docker
+        mode: "0755"
+      notify:
+      - Docker Compose Standalone version
+  when: not stat_docker_result.stat.exists
+
+- name: Create ~/.docker directory
+  become_user: "{{ ssh_user }}"
+  file:
+    path: /home/{{ ssh_user }}/.docker
+    state: directory
+    owner: "{{ ssh_user }}"
+    group: "{{ ssh_user }}"
+    mode: 0755
+
+- name: Creating a docker config file with content
+  become_user: "{{ ssh_user }}"
+  copy:
+    dest: "{{ ssh_user_home }}/.docker/config.json"
+    content: |
+      {
+        "proxies": {
+          "default": {
+            "httpProxy": "{{ http_proxy }}",
+            "httpsProxy": "{{ https_proxy }}",
+            "noProxy": "{{ no_proxy }}"
+          }
+        }
+      }
+
+- name: Creating a docker daemon with content
+  become: true
+  copy:
+    dest: "/etc/docker/daemon.json"
+    content: |
+      {
+        "storage-driver": "overlay2",
+        "exec-opts": ["native.cgroupdriver=systemd"],
+        "proxies": {
+          "http-proxy": "{{ http_proxy }}",
+          "https-proxy": "{{ https_proxy }}",
+          "no-proxy": "{{ no_proxy }}"
+        }
+      }
+  notify: Reload docker
+
+- name: Check docker is active
+  service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Ensure group "docker" exists
+  group:
+    name: docker
+    state: present
+
+- name: Adding "{{ ssh_user }}" to docker group
+  user:
+    name: "{{ ssh_user }}"
+    groups: docker
+    append: yes
+
+- name: Remove swapfile from /etc/fstab
+  ansible.posix.mount:
+    name: "{{ item }}"
+    fstype: swap
+    state: absent
+  loop:
+    - swap
+    - none
+
+- name: Check swap
+  command: /sbin/swapon -s
+  register: swapon
+  changed_when: no
+
+- name: Disable swap
+  command: /sbin/swapoff -a
+  when:
+    - swapon.stdout
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Disable swap in fstab
+  lineinfile:
+    dest: /etc/fstab
+    regexp: swap
+    state: absent
+
+- name: Set vm.swappiness to 0 in /etc/sysctl.conf
+  sysctl:
+    name: vm.swappiness
+    value: '0'
+    state: present
+
+- name: Set ip forwarding on in /proc and in the sysctl file and reload if necessary
+  sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    sysctl_set: yes
+    state: present
+    reload: yes
+
+- name: Add service logging
+  template:
+    src: docker-logging.service.j2
+    dest: "{{ ssh_user_home }}/.vimrc"
+    owner: "{{ ssh_user }}"
+    group: "{{ ssh_user }}"
+
+- name: Copy files
+  become_user: "{{ ssh_user }}"
+  copy:
+    src: ".vimrc"
+    dest: "{{ ssh_user_home }}/"
+    owner: "{{ ssh_user }}"
+    group: "{{ ssh_user }}"
+
+- name: Copy gitlab ssh key with content
+  become_user: "{{ ssh_user }}"
+  copy:
+    src: id_rsa-gitlab
+    dest: "{{ ssh_user_home }}/.ssh/id_rsa-gitlab"
+    mode: '0600'
+
+- name: Set authorized key from file
+  authorized_key:
+    user: "{{ ssh_user }}"
+    state: present
+    key: "{{ lookup('file', 'id_rsa.pub') }}"
+
+- name: Add gitlab ssh config with content
+  become_user: "{{ ssh_user }}"
+  blockinfile:
+    create: true
+    dest: "{{ ssh_user_home }}/.ssh/config"
+    insertafter: EOF
+    content: | 
+      KexAlgorithms diffie-hellman-group1-sha1,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,diffie-hellman-group-exchange-sha256,diffie-hellman-group14-sha1
+      AddressFamily inet
+      TCPKeepAlive yes
+      Host gitlab
+          HostName gitlab.example.com
+          User git
+          IdentityFile ~/.ssh/id_rsa-gitlab
+          StrictHostKeyChecking no
+    validate: ssh -F %s -T gitlab
+  ignore_errors: true
+
+- name: Fetch the latest version of application code
+  git:
+    repo: "git@gitlab.example.com:project/logging.git"
+    dest: "{{ ssh_user_home }}/logging"
+    force: true
+    ignore_unreachable: true
+  when: 0 > 1
+
+- name: Create logging directory
+  file:
+    path: "{{ project_dir }}"
+    state: directory
+    owner: "root"
+    group: "root"
+    mode: 0755
+  
+- name: Copy logging files
+  copy:
+    src: "{{ item }}"
+    dest: "{{ project_dir }}"
+    owner: "root"
+    group: "root"
+    directory_mode: 0755
+    mode: 0644
+  loop:
+    - ../../rsyslog
+    - ../../loganalyzer 
+    - ../../postgresql 
+    - ../../docker-compose.yml
+
+- name: Create random but idempotent password
+  ansible.builtin.set_fact:
+    postgres_password: "{{ lookup('ansible.builtin.password', '/tmp/passwordfile', chars=['ascii_letters', 'digits']) }}"
+
+- name: Creating .env file
+  copy:
+    dest: "{{ project_dir }}/.env"
+    content: |
+      POSTGRES_USER=postgres
+      POSTGRES_PASSWORD="{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters', 'digits']) }}"
+
+- name: Add unit file for logging
+  template:
+    src: docker-logging.service.j2
+    dest: /etc/systemd/system/docker-logging.service
+  notify:
+  - Reload systemd
+  - Reload docker
+
+- name: Create logging directory
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "999"
+    group: "999"
+    mode: "0775"
+  loop:
+  - /var/log/postgresql
+  - /var/lib/postgresql
+
+- name: Create a cron job file under /etc/cron.d
+  ansible.builtin.cron:
+    name: Postgres maintenance
+    weekday: "1"
+    minute: "0"
+    hour: "12"
+    user: sp
+    job: "docker compose -f {{ project_dir }}/docker-compose.yml exec -it loganalyzer /bin/bash /htdocs/cron/maintenance.sh"
+    cron_file: postgres_maintenance
+
+- name: Check if logging service is running
+  systemd:
+    name: docker-logging
+    state: started
+    enabled: true
+    daemon_reload: true
+  ignore_errors: true
+  register: logging_service_status
+  notify: Check service logging
+
+- name: Display logging service status
+  debug:
+    var: logging_service_status

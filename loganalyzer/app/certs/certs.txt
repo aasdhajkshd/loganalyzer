@@ -1,0 +1,4 @@
+// loganalyzer/app/httpd.conf
+187    SSLCertificateFile /etc/apache2/cert.pem
+188    SSLCertificateKeyFile /etc/apache2/privkey.pem
+189    SSLCertificateChainFile /etc/apache2/chain.pem

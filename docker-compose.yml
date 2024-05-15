@@ -1,0 +1,127 @@
+name: logging
+services:
+  postgresql:
+    image: postgres:15-alpine
+    container_name: postgresql
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_TIMEZONE: "Europe/Moscow"
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+      TZ: "Europe/Moscow"
+    ports:
+      - "5432:5432/tcp"
+    expose:
+      - 5432
+    volumes:
+      - /var/lib/postgresql/data:/var/lib/postgresql/data
+      - postgresql_log:/var/log/postgresql
+      - ./postgresql/initdb/:/docker-entrypoint-initdb.d
+    networks:
+      - syslog
+    command: ["postgres", "-c", "logging_collector=on", "-c", "log_directory=/var/log/postgresql", "-c", "log_filename=postgresql.log", "-c", "log_statement=all"]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER}']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: on-failure:10
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  loganalyzer:
+    build: ./loganalyzer
+    container_name: loganalyzer
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+    volumes:
+      - loganalyzer_data:/htdocs
+      - ./loganalyzer/app/config.php:/htdocs/config.php:ro
+      - loganalyzer_conf:/etc/apache2
+      - loganalyzer_log:/var/log/apache2
+    healthcheck:
+      test: ['CMD', 'wget', '--no-proxy', '--no-check-certificate', '--no-cache', '--spider', 'localhost/index.php']
+      interval: 5m
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      rsyslog:
+        condition: service_started
+    networks:
+      - syslog
+
+  rsyslog:
+    build: ./rsyslog
+    container_name: rsyslog
+    environment:
+      - TZ=Europe/Moscow
+      - ENABLE_LOGFILES
+      # - RSYSLOG_CONF=/config/rsyslog.conf
+      # - RSYSLOG_CONFIG_BASE64="#cat rsyslog.conf | base64 | tr -d '\n)'"
+    ports:
+      - "514:514/tcp"
+      - "514:514/udp"
+    volumes:
+      - rsyslog_conf:/config
+      - rsyslog_log:/logs
+    depends_on:
+       postgresql:
+         condition: service_healthy
+    restart: on-failure:10
+    networks:
+      - syslog
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-pgadmin4@pgadmin.org}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_ENABLE_TLS: 'False'
+      PGADMIN_LISTEN_ADDRESS: 0.0.0.0
+      PGADMIN_LISTEN_PORT: 80
+      PGADMIN_DEFAULT_SERVER: localhost:5432
+      PGADMIN_CONFIG_CONSOLE_LOG_LEVEL: 10
+      TZ: "Europe/Moscow"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+       postgresql:
+         condition: service_healthy
+    networks:
+      - homework
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+
+networks:
+  syslog:
+    driver: bridge
+
+volumes:
+  postgresql_data:
+    labels:
+      pg.description: "database volume"
+  postgresql_conf:
+  postgresql_log: 
+  loganalyzer_data:
+  loganalyzer_conf:
+  loganalyzer_log:
+  pgadmin_data:
+  rsyslog_conf:
+  rsyslog_work:
+  rsyslog_log:

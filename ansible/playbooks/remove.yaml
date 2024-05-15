@@ -1,0 +1,71 @@
+---
+- name: Remove logger
+  hosts: logger
+  vars:
+    ssh_user: sp
+    env: local
+  remote_user: "{{ ssh_user }}"
+  become: true
+  gather_facts: false
+  ignore_errors: true
+  tasks:
+  - name: Wait for system to become reachable
+    wait_for_connection:
+
+  - name: Gather facts for the first time
+    setup:
+
+  - fail:
+      msg: "OS should be OL9 {{ required_os_version }}, not {{ ansible_distribution }} {{ ansible_distribution_version }}"
+    when: ansible_distribution != 'OracleLinux' or ansible_distribution_version != '9.3'
+    
+  - name: Set distribution to CentOS
+    ansible.builtin.set_fact:
+      distr: "{{ 'CentOS' if (ansible_distribution == 'OracleLinux' ) else (ansible_distribution | lower) }}"
+
+  - name: Set logger directory path
+    set_fact:
+      logger_dir: "/opt/logging"
+
+  - name: Check logger service is active
+    service:
+      name: docker-logging
+      state: stopped
+      enabled: false
+
+  - name: Remove logger service file
+    file:
+      path: /etc/systemd/system/docker-logging.service
+      state: absent
+
+  - name: Remove a cron job file under /etc/cron.d
+    cron:
+      name: Postgres maintenance
+      user: sp
+      state : absent
+      cron_file: postgres_maintenance
+
+  - name: Check if logging service is not running anymore
+    systemd:
+      name: docker-logging
+      state: stopped
+      enabled: false
+      daemon_reload: true
+
+  - name: Shutdown logging containers
+    command:
+      cmd: docker compose --file /opt/logging/docker-compose.yml down
+
+  - name: Finally prune all
+    command:
+      cmd: docker system prune --all --force --volumes
+
+  - name: Delete "{{ logger_dir }}" logging files
+    file:
+      path: "{{ logger_dir }}"
+      state: absent
+
+  - name: Print the msg
+    debug:
+      msg: "Removed {{ logger_dir }} direcotry"
+

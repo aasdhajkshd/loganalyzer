@@ -1,0 +1,10 @@
+Options -indexes
+AuthType Basic
+AuthName "Restricted Area"
+AuthBasicProvider ldap
+AuthLDAPUrl "ldap://example.com:3268/DC=example,DC=com?sAMAccountName?sub?(&(&(objectClass=User)(objectCategory=Person)(sAMAccountName=*))(!(userAccountControl=514)))"NONE
+AuthLDAPBindDN "CN=logger,OU=MGMT,OU=LOGGER,OU=Cloud,OU=Servers,DC=example,DC=com"
+AuthLDAPBindPassword "[*f5ehdLUf$5"
+Require valid-user
+Require ldap-group CN=Loganalyzer,OU=MGMT,OU=LOGGER,OU=Cloud,OU=Servers,DC=example,DC=com
+

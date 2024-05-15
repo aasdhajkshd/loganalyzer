@@ -1,0 +1,4 @@
+---
+ssh_user: sp
+ssh_user_home: /home/{{ ssh_user }}
+env: local
